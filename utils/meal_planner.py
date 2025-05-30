@@ -13,6 +13,12 @@ The module uses the Spoonacular API to:
 - Get detailed nutrition information for recipes
 - Handle dietary restrictions and allergies
 - Calculate and validate macro distributions
+
+Key Features:
+- Dynamic meal distribution across breakfast, lunch, and dinner
+- Automatic nutrition calculation and macro distribution
+- Support for various dietary restrictions and allergies
+- Error handling for API limitations and rate limits
 """
 
 import os
@@ -38,6 +44,12 @@ class MealPlanner:
     - Macro distribution goals (protein, fat, carbs)
     - Dietary restrictions
     - Allergy considerations
+    
+    Attributes:
+        api_key (str): The Spoonacular API key loaded from environment variables
+        BASE_URL (str): Base URL for the meal planner API endpoint
+        RECIPE_NUTRITION_URL (str): URL template for getting recipe nutrition info
+        IMAGE_BASE_URL (str): Base URL for recipe images
     """
     
     # Base URLs for different Spoonacular API endpoints
@@ -62,6 +74,9 @@ class MealPlanner:
     def get_recipe_nutrition(self, recipe_id: int) -> Dict:
         """
         Get detailed nutrition information for a specific recipe.
+        
+        This method fetches nutrition data for a specific recipe from the Spoonacular API,
+        including calories, macronutrients, and other nutritional information.
         
         Args:
             recipe_id: The Spoonacular recipe ID to get nutrition info for
@@ -94,19 +109,27 @@ class MealPlanner:
         """
         Generate a meal plan using the Spoonacular API.
         
+        This method creates a personalized meal plan based on the user's calorie goals,
+        dietary restrictions, and allergies. It handles API rate limits and errors
+        gracefully, providing clear error messages for common issues.
+        
         Args:
             target_calories: Target daily calorie intake
             diet: Optional dietary restrictions (e.g., "vegetarian", "vegan")
-            exclude: Optional ingredients to exclude
+            exclude: Optional ingredients to exclude (e.g., "shellfish", "nuts")
             time_frame: Time frame for the meal plan ("day" or "week")
             
         Returns:
-            Dict containing the generated meal plan
+            Dict containing the generated meal plan with:
+            - List of meals with their details
+            - Total daily nutrition information
+            - Macro distribution
             
         Raises:
             ValueError: If the API request fails or returns invalid data
             requests.exceptions.RequestException: If there's an error with the API request
         """
+        # Set up API request parameters
         params = {
             "apiKey": self.api_key,
             "timeFrame": time_frame,
@@ -115,15 +138,18 @@ class MealPlanner:
             "addRecipeInformation": True
         }
         
+        # Add optional parameters if provided
         if diet:
             params["diet"] = diet
         if exclude:
             params["exclude"] = exclude
         
         try:
+            # Make API request
             response = requests.get(self.BASE_URL, params=params)
             response.raise_for_status()
             
+            # Process response
             data = response.json()
             if not data.get("meals"):
                 raise ValueError("Could not generate a meal plan with the given constraints")
@@ -131,6 +157,7 @@ class MealPlanner:
             return self._process_meal_plan(data)
             
         except requests.exceptions.HTTPError as e:
+            # Handle specific API errors
             if e.response.status_code == 402:
                 raise ValueError("API quota exceeded. Please try again later or upgrade your plan.")
             elif e.response.status_code == 401:
@@ -148,15 +175,23 @@ class MealPlanner:
         """
         Process the raw API response into a structured meal plan.
         
+        This method takes the raw API response and organizes it into a structured
+        meal plan with proper meal types (Breakfast, Lunch, Dinner), calculates
+        total nutrition information, and formats the data for display.
+        
         Args:
-            data: Raw API response data
+            data: Raw API response data containing meal information
             
         Returns:
-            Dict containing the processed meal plan
+            Dict containing the processed meal plan with:
+            - Organized meals by type
+            - Combined nutrition information
+            - Total daily macros and calories
         """
+        # Get meals from response
         meals = data.get("meals", [])
         
-        # Group meals by type
+        # Initialize meal type containers
         meal_types = {
             "Breakfast": [],
             "Lunch": [],
@@ -168,31 +203,31 @@ class MealPlanner:
             meal_type = list(meal_types.keys())[i % len(meal_types)]
             meal_types[meal_type].append(meal)
         
-        # Process each meal type
+        # Initialize tracking variables
         processed_meals = []
         total_daily_calories = 0
         total_daily_protein = 0
         total_daily_fat = 0
         total_daily_carbs = 0
         
+        # Process each meal type
         for meal_type, type_meals in meal_types.items():
             if not type_meals:
                 continue
                 
-            # Calculate combined nutrition info
+            # Initialize nutrition totals for this meal type
             total_calories = 0
             total_protein = 0
             total_fat = 0
             total_carbs = 0
             
+            # Calculate nutrition for each meal
             for meal in type_meals:
-                # Get nutrition data from the meal
                 nutrition = meal.get("nutrition", {})
                 if not nutrition:
-                    # If nutrition data is not in the expected format, try to get it from the API
                     try:
+                        # Get nutrition data from API if not in meal data
                         nutrition_data = self.get_recipe_nutrition(meal.get("id"))
-                        # Extract nutrition values, removing any non-numeric characters
                         calories = float(nutrition_data.get("calories", "0").replace("kcal", "").strip())
                         protein = float(nutrition_data.get("protein", "0").replace("g", "").strip())
                         fat = float(nutrition_data.get("fat", "0").replace("g", "").strip())
@@ -205,7 +240,7 @@ class MealPlanner:
                     except Exception:
                         continue
                 else:
-                    # Use the nutrition data from the meal
+                    # Use nutrition data from meal
                     total_calories += float(nutrition.get("calories", 0))
                     total_protein += float(nutrition.get("protein", 0))
                     total_fat += float(nutrition.get("fat", 0))
@@ -217,6 +252,7 @@ class MealPlanner:
             total_daily_fat += total_fat
             total_daily_carbs += total_carbs
             
+            # Create processed meal entry
             processed_meals.append({
                 "title": meal_type,
                 "image": f"{self.IMAGE_BASE_URL}{type_meals[0].get('image', '')}" if type_meals else "",
@@ -229,9 +265,10 @@ class MealPlanner:
                     "fat": round(total_fat, 2),
                     "carbs": round(total_carbs, 2)
                 },
-                "meals": type_meals  # Include the original meals for detailed display
+                "meals": type_meals
             })
         
+        # Return processed meal plan with daily totals
         return {
             "meals": processed_meals,
             "nutrients": {
