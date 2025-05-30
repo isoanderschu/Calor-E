@@ -1,5 +1,5 @@
 """
-Calorie & Meal Planning App
+Calor-E
 
 This is the main application file that creates a Streamlit web interface for:
 1. Calculating daily calorie needs based on personal metrics
@@ -391,6 +391,9 @@ with tab3:
                     step=100
                 )
             
+            if calorie_goal > 3000:
+                st.info("Note: For calorie goals above 3000 kcal, we recommend splitting your goal into multiple meal plans. For example, if your goal is 5000 kcal, generate one meal plan for 3000 kcal and another for 2000 kcal, then combine the results.")
+            
             # Macro distribution settings
             st.markdown("### Macro Distribution")
             
@@ -422,14 +425,6 @@ with tab3:
             total_percent = protein_percent + fat_percent + carbs_percent
             if total_percent != 100:
                 st.warning(f"Macro percentages must sum to 100% (current: {total_percent}%)")
-            
-            # Meal preferences
-            st.markdown("### Meal Preferences")
-            number_of_meals = st.selectbox(
-                "Number of meals per day",
-                options=[1, 2, 3],
-                index=2  # Default to 3 meals
-            )
             
             # Dietary restrictions
             st.markdown("### Dietary Preferences")
@@ -543,6 +538,27 @@ with tab3:
                         )
                         st.plotly_chart(fig, use_container_width=True)
                         
+                        # Calculate actual macro distribution percentages
+                        total_macros = nutrients.get('protein', 0) + nutrients.get('fat', 0) + nutrients.get('carbs', 0)
+                        actual_protein = (nutrients.get('protein', 0) / total_macros * 100) if total_macros > 0 else 0
+                        actual_fat = (nutrients.get('fat', 0) / total_macros * 100) if total_macros > 0 else 0
+                        actual_carbs = (nutrients.get('carbs', 0) / total_macros * 100) if total_macros > 0 else 0
+                        
+                        # Create pie chart for actual macro distribution
+                        st.markdown("### Actual Macro Distribution")
+                        fig_actual = create_macro_pie_chart(
+                            values=[actual_protein, actual_fat, actual_carbs],
+                            title='Actual Macro Distribution'
+                        )
+                        fig_actual.update_traces(
+                            hovertemplate=None,
+                            hoverinfo='none'
+                        )
+                        fig_actual.update_layout(
+                            hovermode=False
+                        )
+                        st.plotly_chart(fig_actual, use_container_width=True)
+                        
                 except ValueError as e:
                     error_message = str(e)
                     if "API daily limit reached" in error_message:
@@ -590,6 +606,6 @@ with tab3:
 # Footer
 st.markdown("""
     <div style='text-align: center; padding: 2rem; color: #666666;'>
-        <p>Calor-E - Your Personal Nutrition Assistant</p>
+        <p>Calor-E – Inspired by ChatGPT</p>
     </div>
 """, unsafe_allow_html=True) 

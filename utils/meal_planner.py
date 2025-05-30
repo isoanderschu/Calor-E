@@ -107,43 +107,42 @@ class MealPlanner:
             ValueError: If the API request fails or returns invalid data
             requests.exceptions.RequestException: If there's an error with the API request
         """
-        # Prepare API request parameters
         params = {
             "apiKey": self.api_key,
             "timeFrame": time_frame,
             "targetCalories": target_calories,
-            "number": 3,  # Number of meals per day
+            "number": 3,  # Get three meals
             "addRecipeInformation": True
         }
         
-        # Add optional parameters if provided
         if diet:
             params["diet"] = diet
         if exclude:
             params["exclude"] = exclude
         
         try:
-            # Make API request
             response = requests.get(self.BASE_URL, params=params)
-            response.raise_for_status()  # Raise exception for HTTP errors
+            response.raise_for_status()
             
             data = response.json()
-            
-            # Check if we got valid meal data
             if not data.get("meals"):
-                raise ValueError("No meals found in API response")
+                raise ValueError("Could not generate a meal plan with the given constraints")
             
-            # Process and return meal plan
             return self._process_meal_plan(data)
             
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 402:
                 raise ValueError("API quota exceeded. Please try again later or upgrade your plan.")
-            raise ValueError(f"API request failed: {str(e)}")
+            elif e.response.status_code == 401:
+                raise ValueError("Invalid API key. Please check your Spoonacular API key.")
+            elif e.response.status_code == 429:
+                raise ValueError("API rate limit exceeded. Please wait a few minutes before trying again.")
+            else:
+                raise ValueError(f"API request failed with status code {e.response.status_code}: {str(e)}")
         except requests.exceptions.RequestException as e:
             raise ValueError(f"Error making API request: {str(e)}")
-        except (KeyError, TypeError) as e:
-            raise ValueError(f"Error processing API response: {str(e)}")
+        except Exception as e:
+            raise ValueError(f"Error generating meal plan: {str(e)}")
     
     def _process_meal_plan(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -156,7 +155,6 @@ class MealPlanner:
             Dict containing the processed meal plan
         """
         meals = data.get("meals", [])
-        nutrients = data.get("nutrients", {})
         
         # Group meals by type
         meal_types = {
@@ -172,18 +170,55 @@ class MealPlanner:
         
         # Process each meal type
         processed_meals = []
+        total_daily_calories = 0
+        total_daily_protein = 0
+        total_daily_fat = 0
+        total_daily_carbs = 0
+        
         for meal_type, type_meals in meal_types.items():
             if not type_meals:
                 continue
                 
             # Calculate combined nutrition info
-            total_calories = sum(meal.get("nutrition", {}).get("calories", 0) for meal in type_meals)
-            total_protein = sum(meal.get("nutrition", {}).get("protein", 0) for meal in type_meals)
-            total_fat = sum(meal.get("nutrition", {}).get("fat", 0) for meal in type_meals)
-            total_carbs = sum(meal.get("nutrition", {}).get("carbs", 0) for meal in type_meals)
+            total_calories = 0
+            total_protein = 0
+            total_fat = 0
+            total_carbs = 0
+            
+            for meal in type_meals:
+                # Get nutrition data from the meal
+                nutrition = meal.get("nutrition", {})
+                if not nutrition:
+                    # If nutrition data is not in the expected format, try to get it from the API
+                    try:
+                        nutrition_data = self.get_recipe_nutrition(meal.get("id"))
+                        # Extract nutrition values, removing any non-numeric characters
+                        calories = float(nutrition_data.get("calories", "0").replace("kcal", "").strip())
+                        protein = float(nutrition_data.get("protein", "0").replace("g", "").strip())
+                        fat = float(nutrition_data.get("fat", "0").replace("g", "").strip())
+                        carbs = float(nutrition_data.get("carbs", "0").replace("g", "").strip())
+                        
+                        total_calories += calories
+                        total_protein += protein
+                        total_fat += fat
+                        total_carbs += carbs
+                    except Exception:
+                        continue
+                else:
+                    # Use the nutrition data from the meal
+                    total_calories += float(nutrition.get("calories", 0))
+                    total_protein += float(nutrition.get("protein", 0))
+                    total_fat += float(nutrition.get("fat", 0))
+                    total_carbs += float(nutrition.get("carbs", 0))
+            
+            # Add to daily totals
+            total_daily_calories += total_calories
+            total_daily_protein += total_protein
+            total_daily_fat += total_fat
+            total_daily_carbs += total_carbs
             
             processed_meals.append({
-                "title": f"{meal_type} ({len(type_meals)} {'meal' if len(type_meals) == 1 else 'meals'})",
+                "title": meal_type,
                 "image": f"{self.IMAGE_BASE_URL}{type_meals[0].get('image', '')}" if type_meals else "",
                 "readyInMinutes": sum(meal.get("readyInMinutes", 0) for meal in type_meals),
                 "servings": sum(meal.get("servings", 0) for meal in type_meals),
@@ -193,16 +228,17 @@ class MealPlanner:
                     "protein": round(total_protein, 2),
                     "fat": round(total_fat, 2),
                     "carbs": round(total_carbs, 2)
-                }
+                },
+                "meals": type_meals  # Include the original meals for detailed display
             })
         
         return {
             "meals": processed_meals,
             "nutrients": {
-                "calories": round(nutrients.get("calories", 0), 2),
-                "protein": round(nutrients.get("protein", 0), 2),
-                "fat": round(nutrients.get("fat", 0), 2),
-                "carbs": round(nutrients.get("carbs", 0), 2)
+                "calories": round(total_daily_calories, 2),
+                "protein": round(total_daily_protein, 2),
+                "fat": round(total_daily_fat, 2),
+                "carbs": round(total_daily_carbs, 2)
             }
         }
     
